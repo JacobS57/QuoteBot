@@ -1,0 +1,48 @@
+workflows:
+  ios_release:
+    name: QuoteBot iOS Release
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: 15.4
+      ios_signing:
+        provisioning_profiles: []   # auto-managed
+      vars:
+        BUNDLE_ID: com.jacobschwartz.quotebot
+      groups:
+        - app_store_connect         # uses the 3 secure vars you added
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+        - $CM_BUILD_DIR/build
+    scripts:
+      - name: Flutter dependencies
+        script: |
+          flutter --version
+          flutter pub get
+      - name: Set unique build number
+        script: |
+          export BUILD_NUMBER=$(date +%s)
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $CM_ENV
+      - name: Configure automatic signing (App Store Connect API key)
+        script: |
+          keychain initialize
+          app-store-connect set-api-key \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --key "$APP_STORE_CONNECT_PRIVATE_KEY"
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build IPA (Release)
+        script: |
+          flutter build ipa --release --build-number=$BUILD_NUMBER
+      - name: Upload to TestFlight
+        script: |
+          IPA_PATH=$(find build/ios/ipa -name "*.ipa" | head -1)
+          if [ -z "$IPA_PATH" ]; then
+            echo "❌ No IPA produced"; exit 1
+          fi
+          app-store-connect publish --path "$IPA_PATH" --submit-to-testflight true
+    artifacts:
+      - build/ios/ipa/*.ipa
