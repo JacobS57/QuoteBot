@@ -25,33 +25,48 @@ workflows:
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $CM_ENV
           echo "Using BUILD_NUMBER=$BUILD_NUMBER"
 
-      # Create the iOS project if it doesn't exist, then configure it
+      # Create/prepare iOS project BEFORE signing
       - name: Generate iOS project (no codesign yet)
         script: |
-          # If ios/ is missing (common on fresh repos), create platform folders
+          # If ios/ missing on a fresh repo, create platform folders
           if [ ! -d "ios" ]; then
-            echo "ios/ not found -> running flutter create ."
+            echo "ios/ not found -> flutter create ."
             flutter create .
           fi
 
-          # Ensure CocoaPods specs are up-to-date, then install pods
+          # Ensure iOS minimum version and install pods
           cd ios
-          # Set iOS minimum version in Podfile
+
+          # Set iOS deployment target in Podfile
           if grep -q "^platform :ios" Podfile; then
             sed -i '' "s/^platform :ios.*/platform :ios, '$IOS_DEPLOYMENT_TARGET'/" Podfile
           else
             echo "platform :ios, '$IOS_DEPLOYMENT_TARGET'" | cat - Podfile > Podfile.tmp && mv Podfile.tmp Podfile
           fi
+
           pod repo update
           pod install
           cd ..
 
-          # Build once without codesign to generate xcworkspace and intermediates
+          # Build once to generate Runner.xcworkspace without codesign
           flutter build ios --release --no-codesign
 
-          # Set the Bundle Identifier in the Xcode project to match provisioning
-          # (Codemagic provides 'xcode-project' helper)
-          xcode-project set-bundle-identifier "$BUNDLE_ID" --targets "Runner"
+          # Include CocoaPods xcconfigs so CocoaPods integration works
+          # (Suppresses the 'base configuration not set' warning)
+          for f in ios/Flutter/Debug.xcconfig ios/Flutter/Release.xcconfig; do
+            if ! grep -q "Pods-Runner" "$f"; then
+              echo '#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.${f##*/Debug.xcconfig}"' > tmp.xcconfig
+              # Fix name for Release vs Debug
+              sed -i '' "s/Debug.xcconfig/${f##*/}/" tmp.xcconfig
+              cat "$f" >> tmp.xcconfig
+              mv tmp.xcconfig "$f"
+            fi
+          done
+
+          # Set PRODUCT_BUNDLE_IDENTIFIER to your desired ID in the Xcode project
+          PBXPROJ="ios/Runner.xcodeproj/project.pbxproj"
+          # Replace any existing PRODUCT_BUNDLE_IDENTIFIER lines
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = [^;]*;/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/" "$PBXPROJ"
 
       # Automatic signing with App Store Connect API key
       - name: Configure automatic signing (ASC API key)
@@ -61,10 +76,12 @@ workflows:
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --key "$APP_STORE_CONNECT_PRIVATE_KEY"
-          # Fetch or create signing files for App Store distribution
+
+          # Fetch/create certs + provisioning profile for App Store distribution
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
-          # Apply profiles to the Xcode project
+
+          # Apply provisioning profiles to the Xcode project
           xcode-project use-profiles
 
       - name: Build signed IPA
@@ -83,5 +100,6 @@ workflows:
 
     artifacts:
       - build/ios/ipa/*.ipa
+
 
 
