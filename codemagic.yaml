@@ -8,7 +8,7 @@ workflows:
       ios_signing:
         provisioning_profiles: []   # auto-managed
       vars:
-        BUNDLE_ID: com.jacobschwartz.quotebot
+        BUNDLE_ID: com.QuoteBot.quotebot
       groups:
         - app_store_connect         # your env var group with Issuer/KeyID/.p8
     cache:
