@@ -5,8 +5,6 @@ workflows:
     environment:
       flutter: stable
       xcode: 15.4
-      ios_signing:
-        provisioning_profiles: []   # auto-managed
       vars:
         BUNDLE_ID: com.QuoteBot.quotebot
     cache:
@@ -24,11 +22,13 @@ workflows:
           export BUILD_NUMBER=$(date +%s)
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $CM_ENV
 
+      # Generate Xcode project BEFORE configuring signing
       - name: Generate iOS project (no codesign yet)
         script: |
           flutter build ios --release --no-codesign
 
-      - name: Configure automatic signing (App Store Connect API key)
+      # Automatic signing with App Store Connect API key
+      - name: Configure automatic signing (ASC API key)
         script: |
           keychain initialize
           app-store-connect set-api-key \
