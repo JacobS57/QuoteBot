@@ -10,21 +10,28 @@ workflows:
       vars:
         BUNDLE_ID: com.jacobschwartz.quotebot
       groups:
-        - app_store_connect         # uses the 3 secure vars you added
+        - app_store_connect         # your env var group with Issuer/KeyID/.p8
     cache:
       cache_paths:
         - ~/.pub-cache
         - $CM_BUILD_DIR/build
     scripts:
-      - name: Flutter dependencies
+      - name: Flutter deps
         script: |
           flutter --version
           flutter pub get
+
       - name: Set unique build number
         script: |
           export BUILD_NUMBER=$(date +%s)
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $CM_ENV
-      - name: Configure automatic signing (App Store Connect API key)
+
+      # Generate the iOS Xcode project BEFORE signing steps
+      - name: Generate iOS project (no codesign)
+        script: |
+          flutter build ios --release --no-codesign
+
+      - name: Configure automatic signing (ASC API key)
         script: |
           keychain initialize
           app-store-connect set-api-key \
@@ -33,10 +40,15 @@ workflows:
             --key "$APP_STORE_CONNECT_PRIVATE_KEY"
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
+          # Now that ios/ exists, apply profiles to the Xcode project
           xcode-project use-profiles
-      - name: Build IPA (Release)
+
+      - name: Build signed IPA
         script: |
+          # flutter build ipa will pick up the profiles configured above
           flutter build ipa --release --build-number=$BUILD_NUMBER
+          ls -l build/ios/ipa || true
+
       - name: Upload to TestFlight
         script: |
           IPA_PATH=$(find build/ios/ipa -name "*.ipa" | head -1)
